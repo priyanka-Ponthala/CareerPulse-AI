@@ -29,7 +29,7 @@ function App() {
       <div className="max-w-4xl mx-auto bg-white shadow-2xl rounded-3xl overflow-hidden">
         <div className="bg-blue-600 p-6 text-white text-center">
           <h1 className="text-3xl font-bold italic">CareerPulse AI</h1>
-          <p className="opacity-80">Phase 1: Smart Placement Predictor</p>
+          <p className="opacity-80">Smart Placement Predictor</p>
         </div>
 
         <form onSubmit={handleSubmit} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
