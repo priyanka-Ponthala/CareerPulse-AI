@@ -1,0 +1,18 @@
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Data & Models (Optional: only if you don't want to push the CSV)
+# placementdata.csv
+
+# Environment variables (for later use with Gemini API)
+.env
+
+# Node.js (for Person B's React app)
+node_modules/
+dist/
+
+# System files
+.DS_Store
+Thumbs.db
