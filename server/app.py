@@ -24,6 +24,7 @@ except Exception as e:
 # --- HELPER FUNCTION FOR CLEANING AI JSON ---
 def clean_ai_json(text):
     text = text.strip()
+    # Remove markdown code blocks if present
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
@@ -120,49 +121,43 @@ def evaluate_interview():
         answer = data.get('answer', '').strip()
 
         if not answer or len(answer) < 5:
-            return jsonify({"error": "No valid answer detected."}), 400
+            return jsonify({
+                "score": 0,
+                "feedback": "Answer was too short to evaluate.",
+                "filler_count": 0
+            }), 200
 
-        # 1. FILLER WORD ANALYSIS (The "Hesitation" factor)
+        # 1. FILLER WORD ANALYSIS
         fillers = ["um", "uh", "like", "basically", "actually", "you know", "i mean", "sort of"]
         words = answer.lower().split()
         filler_count = sum(1 for word in words if word in fillers)
         
-        # 2. CALCULATE CONFIDENCE SCORE (Math-based)
-        # We start at 100 and subtract 5 points for every filler word used
-        base_confidence = 100 - (filler_count * 5)
-        # Ensure it doesn't go below 10
-        final_confidence_score = max(10, base_confidence)
-
-        # 3. AI TECHNICAL EVALUATION
-        # We use Gemini-2.0-flash as you mentioned it works for you
+        # 2. AI EVALUATION
+        # Using 1.5-flash for stability, or 2.0-flash if your environment supports it
         ai_model = genai.GenerativeModel('gemini-2.5-flash') 
         prompt = f"""
         Question: {question}
         User Answer: {answer}
         
-        Task:
-        1. Rate technical accuracy (1-10).
-        2. Provide 15-word feedback.
-        3. Rate how "Confident" the phrasing sounds (1-10).
-        
-        Return ONLY JSON:
+        Evaluate this technical answer.
+        Return ONLY a JSON object with this exact structure:
         {{
-          "technical_score": number,
-          "feedback": "string",
-          "ai_confidence_rating": number
+          "score": number (1 to 10),
+          "feedback": "string (max 20 words)"
         }}
         """
         response = ai_model.generate_content(prompt)
-        # Use your clean_ai_json helper here
         evaluation = json.loads(clean_ai_json(response.text))
 
-        # 4. COMBINE EVERYTHING
+        # 3. SAFETY CHECK: Ensure key is 'score' for React
+        final_score = evaluation.get('score', 0)
+        if 'technical_score' in evaluation:
+            final_score = evaluation['technical_score']
+
         return jsonify({
-            "technical_score": evaluation['technical_score'],
-            "feedback": evaluation['feedback'],
-            "filler_count": filler_count,
-            "confidence_score": final_confidence_score, # Our math score
-            "ai_confidence_rating": evaluation['ai_confidence_rating'] # Gemini's opinion
+            "score": final_score, # Matches item.score in React
+            "feedback": evaluation.get('feedback', 'No feedback provided'),
+            "filler_count": filler_count
         })
 
     except Exception as e:
