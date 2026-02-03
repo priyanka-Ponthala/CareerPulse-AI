@@ -6,25 +6,40 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 import json
 import re
+import sqlite3
+from datetime import datetime
 
+# --- DATABASE INITIALIZATION ---
+def init_db():
+    conn = sqlite3.connect('career_pulse.db')
+    cursor = conn.cursor()
+    # Table to track session history over time
+    cursor.execute('''CREATE TABLE IF NOT EXISTS history 
+        (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+         date TEXT, 
+         role TEXT, 
+         probability REAL, 
+         avg_interview_score REAL)''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# --- APP CONFIGURATION ---
 app = Flask(__name__)
 CORS(app)
-
-# --- CONFIGURATION ---
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-# --- LOAD ML MODEL (PHASE 1) ---
+# --- LOAD ML MODEL ---
 try:
-    # Ensure model.pkl is in the same folder as app.py
     model = pickle.load(open('model.pkl', 'rb'))
 except Exception as e:
     print(f"Error loading model.pkl: {e}")
 
-# --- HELPER FUNCTION FOR CLEANING AI JSON ---
+# --- HELPER FUNCTIONS ---
 def clean_ai_json(text):
     text = text.strip()
-    # Remove markdown code blocks if present
     if text.startswith("```"):
         text = text.split("```")[1]
         if text.startswith("json"):
@@ -70,65 +85,38 @@ def analyze_skills():
         target_role = data.get('targetRole')
         user_skills = data.get('userSkills')
 
-        ai_model = genai.GenerativeModel('gemini-2.5-flash')
-
+        ai_model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"""
-        Act as a professional technical recruiter. 
-        Target Role: {target_role}
-        Current Skills: {user_skills}
-        Identify 5 missing skills for 2025 industry standards. 
-        Return ONLY a raw JSON object. Structure:
+        Act as a tech recruiter. Target Role: {target_role}. Skills: {user_skills}.
+        Identify 5 missing skills for 2025. Return ONLY JSON:
         {{
           "missing_skills": ["skill1", "skill2", "skill3", "skill4", "skill5"],
           "advice": "one short sentence"
         }}
         """
         response = ai_model.generate_content(prompt)
-        clean_text = clean_ai_json(response.text)
-        return jsonify(json.loads(clean_text))
+        return jsonify(json.loads(clean_ai_json(response.text)))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # ---------------------------------------------------------
-# ROUTE 3: GENERATE INTERVIEW QUESTIONS (PHASE 3)
+# ROUTE 3: GENERATE QUESTIONS (PHASE 3)
 # ---------------------------------------------------------
 @app.route('/generate-questions', methods=['POST'])
 def generate_questions():
     try:
         data = request.json
         role = data.get('targetRole')
+        prompt = f"Conduct a screening for {role}. Give 3 technical questions (15-25 words each). Return ONLY JSON list of strings."
         
-        # --- IMPROVED PROMPT WITH CONSTRAINTS ---
-        prompt = f"""
-        Act as a supportive hiring manager conducting an initial screening for a {role} position.
-        
-        Goal: Provide 3 technical interview questions.
-        
-        Guidelines:
-        1. Difficulty: Medium. Focus on fundamental CORE concepts only.
-        2. Length: Each question must be between 15 to 25 words. 
-        3. Clarity: Use simple, professional language. No complex multi-part scenarios.
-        4. Tone: Encouraging and direct.
-
-        Return ONLY a JSON list of strings.
-        Example: ["What is the difference between X and Y?", "How would you use Z in a project?"]
-        """
-        
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        # Set temperature to 0.4 for consistent, less "crazy" questions
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(temperature=0.4)
-        )
-        
-        clean_text = response.text.replace('```json', '').replace('```', '').strip()
-        return jsonify(json.loads(clean_text))
+        ai_model = genai.GenerativeModel('gemini-1.5-flash')
+        response = ai_model.generate_content(prompt, generation_config={"temperature": 0.4})
+        return jsonify(json.loads(clean_ai_json(response.text)))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # ---------------------------------------------------------
-# ROUTE 4: EVALUATE INTERVIEW ANSWER (PHASE 3)
+# ROUTE 4: EVALUATE ANSWER + WPM (PHASE 3 & 4)
 # ---------------------------------------------------------
 @app.route('/evaluate-interview', methods=['POST'])
 def evaluate_interview():
@@ -136,49 +124,75 @@ def evaluate_interview():
         data = request.json
         question = data.get('question')
         answer = data.get('answer', '').strip()
+        duration = data.get('duration', 1) # Duration in seconds from frontend
 
         if not answer or len(answer) < 5:
-            return jsonify({
-                "score": 0,
-                "feedback": "Answer was too short to evaluate.",
-                "filler_count": 0
-            }), 200
+            return jsonify({"score": 0, "feedback": "Answer too short.", "filler_count": 0, "wpm": 0}), 200
 
-        # 1. FILLER WORD ANALYSIS
-        fillers = ["um", "uh", "like", "basically", "actually", "you know", "i mean", "sort of"]
-        words = answer.lower().split()
-        filler_count = sum(1 for word in words if word in fillers)
+        # 1. ANALYTICS: WPM & FILLERS
+        words = answer.split()
+        filler_words = ["um", "uh", "like", "basically", "actually", "you know"]
+        filler_count = sum(1 for w in words if w.lower() in filler_words)
+        
+        # WPM Calculation: (Words / Seconds) * 60
+        wpm = round((len(words) / duration) * 60) if duration > 0 else 0
         
         # 2. AI EVALUATION
-        # Using 1.5-flash for stability, or 2.0-flash if your environment supports it
-        ai_model = genai.GenerativeModel('gemini-2.5-flash') 
-        prompt = f"""
-        Question: {question}
-        User Answer: {answer}
+        ai_model = genai.GenerativeModel('gemini-1.5-flash') 
+        prompt = f"Question: {question}. Answer: {answer}. Evaluate accuracy (1-10). Return ONLY JSON: {{'score': 7, 'feedback': 'string'}}"
         
-        Evaluate this technical answer.
-        Return ONLY a JSON object with this exact structure:
-        {{
-          "score": number (1 to 10),
-          "feedback": "string (max 20 words)"
-        }}
-        """
         response = ai_model.generate_content(prompt)
         evaluation = json.loads(clean_ai_json(response.text))
 
-        # 3. SAFETY CHECK: Ensure key is 'score' for React
-        final_score = evaluation.get('score', 0)
-        if 'technical_score' in evaluation:
-            final_score = evaluation['technical_score']
-
         return jsonify({
-            "score": final_score, # Matches item.score in React
-            "feedback": evaluation.get('feedback', 'No feedback provided'),
-            "filler_count": filler_count
+            "score": evaluation.get('score', 5),
+            "feedback": evaluation.get('feedback', ''),
+            "filler_count": filler_count,
+            "wpm": wpm
         })
-
     except Exception as e:
-        print(f"Error in evaluation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ---------------------------------------------------------
+# ROUTE 5: 30-DAY ROADMAP (PHASE 4)
+# ---------------------------------------------------------
+@app.route('/generate-roadmap', methods=['POST'])
+def generate_roadmap():
+    try:
+        data = request.json
+        skills = data.get('missing_skills', [])
+        role = data.get('targetRole')
+        
+        prompt = f"""
+        Role: {role}. Missing Skills: {skills}. 
+        Create a 30-day plan. Return ONLY JSON with keys: week1, week2, week3, week4.
+        """
+        
+        ai_model = genai.GenerativeModel('gemini-1.5-flash')
+        response = ai_model.generate_content(prompt)
+        return jsonify(json.loads(clean_ai_json(response.text)))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ---------------------------------------------------------
+# ROUTE 6: PERSISTENCE (SAVE HISTORY)
+# ---------------------------------------------------------
+@app.route('/save-session', methods=['POST'])
+def save_session():
+    try:
+        data = request.json
+        role = data.get('role')
+        prob = data.get('probability')
+        score = data.get('avg_score')
+
+        conn = sqlite3.connect('career_pulse.db')
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO history (date, role, probability, avg_interview_score) VALUES (?, ?, ?, ?)",
+                       (datetime.now().strftime("%Y-%m-%d %H:%M"), role, prob, score))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "Session Saved"}), 200
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
