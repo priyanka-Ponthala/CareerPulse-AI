@@ -6,29 +6,31 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 import json
 import re
+import pandas as pd
 
 app = Flask(__name__)
 CORS(app)
 
 # --- CONFIGURATION ---
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+print(f"DEBUG: Using API Key starting with: {os.getenv('GEMINI_API_KEY')[:10]}...")
+genai.configure(api_key="AIzaSyDWgOG6lvURRiEWB_6Bm3OIxDxUnyovjh4")
 
-# --- LOAD ML MODEL (PHASE 1) ---
+# Use a stable model name to avoid 404/500 errors
+AI_MODEL = 'gemini-flash-latest'
+
+# --- LOAD ML MODEL ---
 try:
-    # Ensure model.pkl is in the same folder as app.py
-    model = pickle.load(open('model.pkl', 'rb'))
+    with open('model.pkl', 'rb') as f:
+        model = pickle.load(f)
+    print("✅ ML Model loaded successfully")
 except Exception as e:
-    print(f"Error loading model.pkl: {e}")
+    print(f"❌ Error loading model.pkl: {e}")
 
-# --- HELPER FUNCTION FOR CLEANING AI JSON ---
+# --- ROBUST HELPER FUNCTION FOR CLEANING AI JSON ---
 def clean_ai_json(text):
-    text = text.strip()
-    # Remove markdown code blocks if present
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
+    # Removes markdown blocks like ```json ... ``` or ``` ... ```
+    text = re.sub(r'```(?:json)?\s?|```', '', text)
     return text.strip()
 
 # ---------------------------------------------------------
@@ -38,27 +40,27 @@ def clean_ai_json(text):
 def predict():
     try:
         data = request.json
-        features = [
-            float(data['cgpa']),
-            int(data['internships']),
-            int(data['projects']),
-            int(data['workshops']),
-            float(data['aptitudeScore']),
-            float(data['softSkills']),
-            int(data['extracurricular']),
-            int(data['placementTraining']),
-            float(data['ssc_marks']),
-            float(data['hsc_marks'])
-        ]
-        prediction = model.predict([features])[0]
-        probability = model.predict_proba([features])[0][1]
+        # Feature names must match exactly what the model was trained on
+        feature_names = ['cgpa', 'internships', 'projects', 'workshops', 
+                         'aptitudeScore', 'softSkills', 'extracurricular', 
+                         'placementTraining', 'ssc_marks', 'hsc_marks']
         
-        return jsonify({
-            'placed': int(prediction),
-            'probability': round(probability * 100, 2)
-        })
+        features_list = [
+            float(data.get('cgpa', 0)), int(data.get('internships', 0)),
+            int(data.get('projects', 0)), int(data.get('workshops', 0)),
+            float(data.get('aptitudeScore', 0)), float(data.get('softSkills', 0)),
+            int(data.get('extracurricular', 0)), int(data.get('placementTraining', 0)),
+            float(data.get('ssc_marks', 0)), float(data.get('hsc_marks', 0))
+        ]
+        
+        # Convert to DataFrame to avoid "Feature Name" warnings
+        df = pd.DataFrame([features_list], columns=feature_names)
+        probability = model.predict_proba(df)[0][1]
+        
+        return jsonify({'probability': round(probability * 100, 2)})
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        print(f"Predict Error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ---------------------------------------------------------
 # ROUTE 2: SKILL GAP ANALYZER (PHASE 2)
@@ -67,26 +69,12 @@ def predict():
 def analyze_skills():
     try:
         data = request.json
-        target_role = data.get('targetRole')
-        user_skills = data.get('userSkills')
-
-        ai_model = genai.GenerativeModel('gemini-2.5-flash')
-
-        prompt = f"""
-        Act as a professional technical recruiter. 
-        Target Role: {target_role}
-        Current Skills: {user_skills}
-        Identify 5 missing skills for 2025 industry standards. 
-        Return ONLY a raw JSON object. Structure:
-        {{
-          "missing_skills": ["skill1", "skill2", "skill3", "skill4", "skill5"],
-          "advice": "one short sentence"
-        }}
-        """
-        response = ai_model.generate_content(prompt)
-        clean_text = clean_ai_json(response.text)
-        return jsonify(json.loads(clean_text))
+        model_ai = genai.GenerativeModel(AI_MODEL)
+        prompt = f"Target Role: {data.get('targetRole')}. Skills: {data.get('userSkills')}. Identify 5 missing skills for 2025. Return ONLY JSON: {{'missing_skills': [], 'advice': ''}}"
+        response = model_ai.generate_content(prompt)
+        return jsonify(json.loads(clean_ai_json(response.text)))
     except Exception as e:
+        print(f"AI Skill Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 # ---------------------------------------------------------
@@ -96,34 +84,10 @@ def analyze_skills():
 def generate_questions():
     try:
         data = request.json
-        role = data.get('targetRole')
-        
-        # --- IMPROVED PROMPT WITH CONSTRAINTS ---
-        prompt = f"""
-        Act as a supportive hiring manager conducting an initial screening for a {role} position.
-        
-        Goal: Provide 3 technical interview questions.
-        
-        Guidelines:
-        1. Difficulty: Medium. Focus on fundamental CORE concepts only.
-        2. Length: Each question must be between 15 to 25 words. 
-        3. Clarity: Use simple, professional language. No complex multi-part scenarios.
-        4. Tone: Encouraging and direct.
-
-        Return ONLY a JSON list of strings.
-        Example: ["What is the difference between X and Y?", "How would you use Z in a project?"]
-        """
-        
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        # Set temperature to 0.4 for consistent, less "crazy" questions
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(temperature=0.4)
-        )
-        
-        clean_text = response.text.replace('```json', '').replace('```', '').strip()
-        return jsonify(json.loads(clean_text))
+        model_ai = genai.GenerativeModel(AI_MODEL)
+        prompt = f"Hiring for {data.get('targetRole')}. Provide 3 technical questions (medium difficulty, 15-25 words). Return ONLY a JSON list of strings."
+        response = model_ai.generate_content(prompt)
+        return jsonify(json.loads(clean_ai_json(response.text)))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -137,93 +101,77 @@ def evaluate_interview():
         question = data.get('question')
         answer = data.get('answer', '').strip()
 
-        if not answer or len(answer) < 5:
-            return jsonify({
-                "score": 0,
-                "feedback": "Answer was too short to evaluate.",
-                "filler_count": 0
-            }), 200
+        if len(answer) < 5:
+            return jsonify({"score": 1, "feedback": "Answer too short.", "filler_count": 0})
 
-        # 1. FILLER WORD ANALYSIS
-        fillers = ["um", "uh", "like", "basically", "actually", "you know", "i mean", "sort of"]
-        words = answer.lower().split()
-        filler_count = sum(1 for word in words if word in fillers)
-        
-        # 2. AI EVALUATION
-        # Using 1.5-flash for stability, or 2.0-flash if your environment supports it
-        ai_model = genai.GenerativeModel('gemini-2.5-flash') 
+        # 1. Filler count
+        fillers = ["um", "uh", "like", "basically", "actually"]
+        f_count = sum(1 for w in answer.lower().split() if w in fillers)
+
+        # 2. AI Prompt (Added "Double Quotes" instruction)
+        model_ai = genai.GenerativeModel(AI_MODEL)
         prompt = f"""
         Question: {question}
         User Answer: {answer}
-        
-        Evaluate this technical answer.
-        Return ONLY a JSON object with this exact structure:
-        {{
-          "score": number (1 to 10),
-          "feedback": "string (max 20 words)"
-        }}
+        Evaluate technical accuracy. 
+        IMPORTANT: Use ONLY double quotes for keys and string values.
+        Return ONLY this JSON structure:
+        {{"score": 7, "feedback": "concise feedback"}}
         """
-        response = ai_model.generate_content(prompt)
-        evaluation = json.loads(clean_ai_json(response.text))
 
-        # 3. SAFETY CHECK: Ensure key is 'score' for React
-        final_score = evaluation.get('score', 0)
-        if 'technical_score' in evaluation:
-            final_score = evaluation['technical_score']
+        response = model_ai.generate_content(prompt)
+        raw_text = response.text.strip()
+        
+        # 3. ROBUST CLEANING
+        # Remove markdown backticks
+        cleaned_text = re.sub(r'```(?:json)?\s?|```', '', raw_text).strip()
+        
+        # FIX: If AI used single quotes, convert them to double quotes
+        # (This solves the specific error you got)
+        cleaned_text = cleaned_text.replace("'", '"')
 
-        return jsonify({
-            "score": final_score, # Matches item.score in React
-            "feedback": evaluation.get('feedback', 'No feedback provided'),
-            "filler_count": filler_count
-        })
+        try:
+            evaluation = json.loads(cleaned_text)
+        except Exception as e:
+            # Fallback if JSON is still broken
+            print(f"JSON Parse Retry failed: {cleaned_text}")
+            return jsonify({
+                "score": 5, 
+                "feedback": "Technical answer received. AI had trouble formatting score.",
+                "filler_count": f_count
+            })
+        
+        if "rating" in evaluation: evaluation["score"] = evaluation["rating"]
+        evaluation['filler_count'] = f_count
+        return jsonify(evaluation)
 
     except Exception as e:
-        print(f"Error in evaluation: {e}")
+        print(f"Critical Evaluation Error: {e}")
         return jsonify({"error": str(e)}), 500
-    
-    #roadmap
+# ---------------------------------------------------------
+# ROUTE 5: GENERATE ROADMAP (PHASE 4 - NEW FEATURE)
+# ---------------------------------------------------------
 @app.route('/generate-roadmap', methods=['POST'])
 def generate_roadmap():
     try:
         data = request.json
-        role = data.get('targetRole')
-        missing_skills = data.get('missingSkills', [])
-        duration = data.get('duration', '30')
-
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        # We tell the AI to be VERY strict with the format
+        model_ai = genai.GenerativeModel(AI_MODEL)
         prompt = f"""
-        Act as a Senior Career Coach. Create a {duration}-day learning roadmap for a student wanting to be a {role}.
-        Missing Skills to cover: {missing_skills}.
-        
-        Return ONLY a JSON object. No intro text. No markdown formatting.
+        Act as a Career Coach. Create a {data.get('duration')}-day learning roadmap for a {data.get('targetRole')}.
+        Missing Skills: {data.get('missingSkills')}.
+        Return ONLY a JSON object with this structure:
         {{
-          "title": "Roadmap for {role}",
+          "title": "Roadmap Title",
           "weeks": [
-            {{ "week": 1, "goal": "Skill Foundation", "tasks": ["Task A", "Task B"] }}
+            {{ "week": 1, "goal": "Topic Name", "tasks": ["Task 1", "Task 2"] }}
           ]
         }}
         """
-
-        response = model.generate_content(prompt)
-        raw_text = response.text.strip()
-
-        # --- CRASH-PROOF CLEANUP ---
-        # 1. Remove Markdown code blocks if present
-        if "```" in raw_text:
-            raw_text = raw_text.split("```")[1]
-            if raw_text.startswith("json"):
-                raw_text = raw_text[4:]
-        
-        clean_json = raw_text.strip()
-
-        # 2. Convert to Python Dictionary
-        return jsonify(json.loads(clean_json))
-
+        response = model_ai.generate_content(prompt)
+        return jsonify(json.loads(clean_ai_json(response.text)))
     except Exception as e:
-        # If it crashes, print the raw text to the terminal so you can see what happened
-        print("AI RAW RESPONSE CAUSING ERROR:", response.text if 'response' in locals() else "No response")
+        print(f"Roadmap Error: {e}")
         return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
