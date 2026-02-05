@@ -180,6 +180,50 @@ def evaluate_interview():
     except Exception as e:
         print(f"Error in evaluation: {e}")
         return jsonify({"error": str(e)}), 500
+    
+    #roadmap
+@app.route('/generate-roadmap', methods=['POST'])
+def generate_roadmap():
+    try:
+        data = request.json
+        role = data.get('targetRole')
+        missing_skills = data.get('missingSkills', [])
+        duration = data.get('duration', '30')
 
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        # We tell the AI to be VERY strict with the format
+        prompt = f"""
+        Act as a Senior Career Coach. Create a {duration}-day learning roadmap for a student wanting to be a {role}.
+        Missing Skills to cover: {missing_skills}.
+        
+        Return ONLY a JSON object. No intro text. No markdown formatting.
+        {{
+          "title": "Roadmap for {role}",
+          "weeks": [
+            {{ "week": 1, "goal": "Skill Foundation", "tasks": ["Task A", "Task B"] }}
+          ]
+        }}
+        """
+
+        response = model.generate_content(prompt)
+        raw_text = response.text.strip()
+
+        # --- CRASH-PROOF CLEANUP ---
+        # 1. Remove Markdown code blocks if present
+        if "```" in raw_text:
+            raw_text = raw_text.split("```")[1]
+            if raw_text.startswith("json"):
+                raw_text = raw_text[4:]
+        
+        clean_json = raw_text.strip()
+
+        # 2. Convert to Python Dictionary
+        return jsonify(json.loads(clean_json))
+
+    except Exception as e:
+        # If it crashes, print the raw text to the terminal so you can see what happened
+        print("AI RAW RESPONSE CAUSING ERROR:", response.text if 'response' in locals() else "No response")
+        return jsonify({"error": str(e)}), 500
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
