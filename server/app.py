@@ -96,16 +96,33 @@ def analyze_skills():
 def generate_questions():
     try:
         data = request.json
-        target_role = data.get('targetRole')
-
-        ai_model = genai.GenerativeModel('gemini-2.5-flash')
+        role = data.get('targetRole')
+        
+        # --- IMPROVED PROMPT WITH CONSTRAINTS ---
         prompt = f"""
-        Act as a technical interviewer for a {target_role} position. 
-        Generate 3 challenging technical interview questions. 
-        Return ONLY a JSON list of strings. Example: ["question1", "question2", "question3"]
+        Act as a supportive hiring manager conducting an initial screening for a {role} position.
+        
+        Goal: Provide 3 technical interview questions.
+        
+        Guidelines:
+        1. Difficulty: Medium. Focus on fundamental CORE concepts only.
+        2. Length: Each question must be between 15 to 25 words. 
+        3. Clarity: Use simple, professional language. No complex multi-part scenarios.
+        4. Tone: Encouraging and direct.
+
+        Return ONLY a JSON list of strings.
+        Example: ["What is the difference between X and Y?", "How would you use Z in a project?"]
         """
-        response = ai_model.generate_content(prompt)
-        clean_text = clean_ai_json(response.text)
+        
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        # Set temperature to 0.4 for consistent, less "crazy" questions
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(temperature=0.4)
+        )
+        
+        clean_text = response.text.replace('```json', '').replace('```', '').strip()
         return jsonify(json.loads(clean_text))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
