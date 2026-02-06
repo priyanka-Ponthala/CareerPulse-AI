@@ -14,7 +14,8 @@ load_dotenv()
 
 # --- CONFIGURATION ---
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-AI_MODEL = 'gemini-flash-latest' # Stable version with high quota
+# USE THIS MODEL ONLY - It has the highest free quota for dynamic results
+AI_MODEL = 'gemini-flash-latest' 
 
 # --- LOAD ML MODEL ---
 try:
@@ -24,37 +25,25 @@ try:
 except Exception as e:
     print(f"❌ ML Model Error: {e}")
 
-# --- THE MOST ROBUST JSON CLEANER ---
+# --- DYNAMIC JSON EXTRACTOR ---
+# This finds the JSON part even if the AI adds extra text
 def extract_json(text):
     try:
-        # Find the first { and the last }
         start = text.find('{')
         end = text.rfind('}') + 1
         json_str = text[start:end]
         return json.loads(json_str)
-    except Exception:
-        # Fallback if no JSON structure is found at all
-        raise ValueError("AI failed to provide a structured response.")
+    except:
+        return None
 
-# ---------------------------------------------------------
-# ROUTES
-# ---------------------------------------------------------
+# --- ROUTES ---
 
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
         data = request.json
         feature_names = ['cgpa', 'internships', 'projects', 'workshops', 'aptitudeScore', 'softSkills', 'extracurricular', 'placementTraining', 'ssc_marks', 'hsc_marks']
-        
-        # Ensure data is converted to float/int correctly
-        features_list = [
-            float(data.get('cgpa', 0)), int(data.get('internships', 0)), 
-            int(data.get('projects', 0)), int(data.get('workshops', 0)), 
-            float(data.get('aptitudeScore', 0)), float(data.get('softSkills', 0)), 
-            1, 1, # Placeholders for trained categorical fields
-            float(data.get('ssc_marks', 0)), float(data.get('hsc_marks', 0))
-        ]
-        
+        features_list = [float(data.get('cgpa', 0)), int(data.get('internships', 0)), int(data.get('projects', 0)), int(data.get('workshops', 0)), float(data.get('aptitudeScore', 0)), float(data.get('softSkills', 0)), 1, 1, float(data.get('ssc_marks', 0)), float(data.get('hsc_marks', 0))]
         df = pd.DataFrame([features_list], columns=feature_names)
         prob = model.predict_proba(df)[0][1]
         return jsonify({'probability': round(prob * 100, 2)})
@@ -63,96 +52,80 @@ def predict():
 
 @app.route('/analyze-profile', methods=['POST'])
 def analyze_profile():
+    data = request.json
+    role = data.get('targetRole')
+    skills = data.get('userSkills')
+    project = data.get('projectDesc')
+
     try:
-        data = request.json
-        role = data.get('targetRole', 'Developer')
-        skills = data.get('userSkills', '')
-        project = data.get('projectDesc', '')
-
         model_ai = genai.GenerativeModel(AI_MODEL)
+        # PROMPT is 100% dynamic based on user input
         prompt = f"""
-        Analyze this student profile for a recruiter.
-        Target Role: {role}
-        Current Skills: {skills}
-        Project Description: {project}
+        Act as a Technical Recruiter. 
+        User is applying for: {role}. 
+        User current skills: {skills}. 
+        User best project: {project}.
 
-        Step 1: Check spelling of the Target Role.
-        Step 2: Identify 5 missing technical skills for 2025.
-        Step 3: Evaluate the project technical depth.
-        Step 4: Suggest 3 specific improvements for this project.
+        1. Correct the spelling of the role '{role}'.
+        2. Identify 5 specific missing skills for this role in 2025.
+        3. Evaluate the project: is it relevant for a {role}? 
+        4. Give 3 technical improvements for the project.
 
         Return ONLY a JSON object:
         {{
           "corrected_role": "string",
           "missing_skills": ["skill1", "skill2", "skill3", "skill4", "skill5"],
-          "project_evaluation": "2 sentence technical critique",
+          "project_evaluation": "2 sentence specific technical critique",
           "project_suggestions": ["tip1", "tip2", "tip3"],
-          "advice": "10-word motivational advice"
+          "advice": "10-word career tip"
         }}
         """
         response = model_ai.generate_content(prompt)
-        # Use our robust extractor
-        result = extract_json(response.text)
-        return jsonify(result)
+        res_json = extract_json(response.text)
+        return jsonify(res_json)
     except Exception as e:
-        print(f"AI Error: {e}")
-        return jsonify({"error": "AI is temporarily busy or blocked. Try shorter descriptions."}), 500
+        return jsonify({"error": "AI Quota exceeded. Please wait 60 seconds."}), 429
 
 @app.route('/generate-questions', methods=['POST'])
 def generate_questions():
+    role = request.json.get('targetRole')
     try:
-        data = request.json
-        role = data.get('targetRole', 'Developer')
         model_ai = genai.GenerativeModel(AI_MODEL)
-        prompt = f"As a recruiter for {role}, give 3 technical interview questions (15-20 words each). Return ONLY a JSON list of strings: [\"q1\", \"q2\", \"q3\"]"
+        prompt = f"Give 3 technical interview questions for a {role} role. Return ONLY a JSON list of strings: [\"q1\", \"q2\", \"q3\"]"
         response = model_ai.generate_content(prompt)
-        
-        # Extracting list from AI text
+        # Extract the list [...] from the response
         text = response.text
-        start = text.find('[')
-        end = text.rfind(']') + 1
+        start, end = text.find('['), text.rfind(']') + 1
         return jsonify(json.loads(text[start:end]))
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except:
+        return jsonify({"error": "AI busy"}), 429
 
 @app.route('/evaluate-interview', methods=['POST'])
 def evaluate_interview():
+    data = request.json
     try:
-        data = request.json
-        ans = data.get('answer', '')
-        q = data.get('question', '')
-        
-        # Filler counting
-        fillers = ["um", "uh", "like", "basically", "actually"]
-        f_count = sum(1 for w in ans.lower().split() if w in fillers)
-        
         model_ai = genai.GenerativeModel(AI_MODEL)
-        prompt = f"Question: {q}. Answer: {ans}. Evaluate technical accuracy (score 1-10) and feedback (15 words). Return ONLY JSON: {{\"score\": 8, \"feedback\": \"...\"}}"
+        prompt = f"Question: {data.get('question')}. Answer: {data.get('answer')}. Rate technical accuracy (1-10) and give feedback. Return ONLY JSON: {{'score': 8, 'feedback': '...'}}"
         response = model_ai.generate_content(prompt)
         eval_data = extract_json(response.text)
-        
-        # Syncing key names for React
-        if "rating" in eval_data: eval_data["score"] = eval_data["rating"]
-        eval_data['filler_count'] = f_count
+        eval_data['filler_count'] = sum(1 for w in data.get('answer','').lower().split() if w in ["um", "uh", "like"])
         return jsonify(eval_data)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except:
+        return jsonify({"error": "AI busy"}), 429
 
 @app.route('/generate-roadmap', methods=['POST'])
 def generate_roadmap():
+    data = request.json
+    role = data.get('targetRole')
+    duration = data.get('duration')
+    weeks = 8 if duration == "60" else 4
     try:
-        data = request.json
-        role = data.get('targetRole')
-        missing = data.get('missingSkills')
-        duration = data.get('duration', '30')
-        weeks = 8 if duration == "60" else 4
-
         model_ai = genai.GenerativeModel(AI_MODEL)
-        prompt = f"Generate a {duration}-day roadmap for {role} role to learn {missing}. Create exactly {weeks} weeks. Return ONLY JSON: {{'title': '', 'weeks': [{{'week': 1, 'goal': '', 'tasks': []}}]}}"
+        prompt = f"Create a {duration}-day roadmap for {role}. Generate {weeks} weeks. Return ONLY JSON: {{'title': '...', 'weeks': [{{'week': 1, 'goal': '...', 'tasks': []}}]}}"
         response = model_ai.generate_content(prompt)
         return jsonify(extract_json(response.text))
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except:
+        return jsonify({"error": "AI busy"}), 429
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

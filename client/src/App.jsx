@@ -215,7 +215,7 @@ function App() {
               </div>
               <div className="bg-indigo-600 p-10 rounded-[3rem] text-white text-center shadow-2xl">
                 <h3 className="text-2xl font-bold mb-2">Final Step: Roadmap 🚀</h3>
-                <div className="flex justify-center gap-4 my-6">{["30", "60"].map(d => <button key={d} onClick={() => setRoadmapDuration(d)} className={`px-8 py-3 rounded-xl font-bold ${roadmapDuration === d ? 'bg-white text-indigo-600' : 'bg-indigo-500'}`}>{d} Days</button>)}</div>
+                <div className="flex justify-center gap-4 my-6">{["30"].map(d => <button key={d} onClick={() => setRoadmapDuration(d)} className={`px-8 py-3 rounded-xl font-bold ${roadmapDuration === d ? 'bg-white text-indigo-600' : 'bg-indigo-500'}`}>{d} Days</button>)}</div>
                 <button onClick={handleGenerateRoadmap} disabled={loading} className="w-full bg-slate-900 py-5 rounded-2xl font-black">{loading ? <RefreshCcw className="animate-spin mx-auto"/> : "Get My Custom Plan →"}</button>
               </div>
             </motion.div>
