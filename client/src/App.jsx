@@ -11,7 +11,6 @@ function App() {
     workshops: 0, internships: 0, softSkills: 0, 
     targetRole: '', userSkills: '', projectDesc: ''
   });
-
   const [result, setResult] = useState(null);
   const [profileAnalysis, setProfileAnalysis] = useState(null);
   const [questions, setQuestions] = useState([]);
@@ -21,7 +20,6 @@ function App() {
   const [isListening, setIsListening] = useState(false);
   const [roadmap, setRoadmap] = useState(null);
   const [roadmapDuration, setRoadmapDuration] = useState("30");
-
   // --- NEW: TEXT TO SPEECH ---
   const speak = (text) => {
     window.speechSynthesis.cancel(); // Stop any previous speech
@@ -29,9 +27,7 @@ function App() {
     utterance.rate = 0.9;
     window.speechSynthesis.speak(utterance);
   };
-  
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
-
   // --- NEW: FRONTEND VALIDATION ---
   const validate = () => {
     if (formData.cgpa > 10 || formData.cgpa < 0) return "CGPA must be between 0 and 10";
@@ -41,7 +37,6 @@ function App() {
     if (formData.projectDesc.split(' ').length < 10) return "Please describe your project in at least 10 words";
     return null;
   };
-
   const handleInitialSubmit = async (e) => {
     e.preventDefault();
     const error = validate();
@@ -244,11 +239,9 @@ function App() {
     </div>
   );
 }
-
 const SectionHeader = ({ icon, title }) => (<div className="md:col-span-2 flex items-center gap-2 text-indigo-600 font-black border-b border-slate-100 pb-3 mb-2 mt-6">{icon} <span className="uppercase tracking-[0.2em] text-[10px] font-black">{title}</span></div>);
 const FormInput = ({ label, name, type = "text", placeholder, onChange }) => (
   <div className="flex flex-col gap-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{label}</label>
   <input type={type} name={name} onChange={onChange} placeholder={placeholder} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-medium focus:bg-white focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all shadow-sm" required /></div>
 );
-
 export default App;

@@ -7,16 +7,13 @@ from dotenv import load_dotenv
 import json
 import re
 import pandas as pd
-
 app = Flask(__name__)
 CORS(app)
 load_dotenv()
-
 # --- CONFIGURATION ---
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 # USE THIS MODEL ONLY - It has the highest free quota for dynamic results
 AI_MODEL = 'gemini-flash-latest' 
-
 # --- LOAD ML MODEL ---
 try:
     with open('model.pkl', 'rb') as f:
@@ -35,9 +32,7 @@ def extract_json(text):
         return json.loads(json_str)
     except:
         return None
-
 # --- ROUTES ---
-
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
@@ -49,14 +44,12 @@ def predict():
         return jsonify({'probability': round(prob * 100, 2)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 @app.route('/analyze-profile', methods=['POST'])
 def analyze_profile():
     data = request.json
     role = data.get('targetRole')
     skills = data.get('userSkills')
     project = data.get('projectDesc')
-
     try:
         model_ai = genai.GenerativeModel(AI_MODEL)
         # PROMPT is 100% dynamic based on user input
@@ -65,7 +58,6 @@ def analyze_profile():
         User is applying for: {role}. 
         User current skills: {skills}. 
         User best project: {project}.
-
         1. Correct the spelling of the role '{role}'.
         2. Identify 5 specific missing skills for this role in 2025.
         3. Evaluate the project: is it relevant for a {role}? 
@@ -85,7 +77,6 @@ def analyze_profile():
         return jsonify(res_json)
     except Exception as e:
         return jsonify({"error": "AI Quota exceeded. Please wait 60 seconds."}), 429
-
 @app.route('/generate-questions', methods=['POST'])
 def generate_questions():
     role = request.json.get('targetRole')
@@ -99,7 +90,6 @@ def generate_questions():
         return jsonify(json.loads(text[start:end]))
     except:
         return jsonify({"error": "AI busy"}), 429
-
 @app.route('/evaluate-interview', methods=['POST'])
 def evaluate_interview():
     data = request.json
@@ -112,7 +102,6 @@ def evaluate_interview():
         return jsonify(eval_data)
     except:
         return jsonify({"error": "AI busy"}), 429
-
 @app.route('/generate-roadmap', methods=['POST'])
 def generate_roadmap():
     data = request.json
@@ -126,6 +115,5 @@ def generate_roadmap():
         return jsonify(extract_json(response.text))
     except:
         return jsonify({"error": "AI busy"}), 429
-
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
