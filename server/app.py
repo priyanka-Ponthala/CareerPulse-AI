@@ -10,17 +10,20 @@ import pandas as pd
 app = Flask(__name__)
 CORS(app)
 load_dotenv()
+
 # --- CONFIGURATION ---
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 # USE THIS MODEL ONLY - It has the highest free quota for dynamic results
 AI_MODEL = 'gemini-flash-latest' 
 # --- LOAD ML MODEL ---
+
 try:
     with open('model.pkl', 'rb') as f:
         model = pickle.load(f)
     print("✅ ML Model Loaded")
 except Exception as e:
     print(f"❌ ML Model Error: {e}")
+
 
 # --- DYNAMIC JSON EXTRACTOR ---
 # This finds the JSON part even if the AI adds extra text
@@ -32,6 +35,7 @@ def extract_json(text):
         return json.loads(json_str)
     except:
         return None
+    
 # --- ROUTES ---
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -53,6 +57,7 @@ def analyze_profile():
     try:
         model_ai = genai.GenerativeModel(AI_MODEL)
         # PROMPT is 100% dynamic based on user input
+
         prompt = f"""
         Act as a Technical Recruiter. 
         User is applying for: {role}. 
@@ -85,6 +90,7 @@ def generate_questions():
         prompt = f"Give 3 technical interview questions for a {role} role. Return ONLY a JSON list of strings: [\"q1\", \"q2\", \"q3\"]"
         response = model_ai.generate_content(prompt)
         # Extract the list [...] from the response
+        
         text = response.text
         start, end = text.find('['), text.rfind(']') + 1
         return jsonify(json.loads(text[start:end]))
